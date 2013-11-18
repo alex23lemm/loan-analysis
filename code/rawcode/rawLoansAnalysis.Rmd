@@ -1,0 +1,509 @@
+Raw Loans Analysis
+========================================================
+
+
+### Load libraries
+
+
+```{r}
+library(ggplot2)
+library(lattice)
+library(plyr)
+library(reshape2)
+library(RColorBrewer)
+```
+
+## Processing
+
+Download the data, read the data in and save the raw data as an RDA file
+
+```{r loadData, cache=TRUE}
+download.file('https://spark-public.s3.amazonaws.com/dataanalysis/loansData.csv', destfile = './data/loansData.csv')
+downloadDate <- date()
+downloadDate
+loansRaw <- read.csv('./data/loansData.csv')
+save(loansRaw, downloadDate , file='./data/loans.rda')
+```
+
+
+### Look at the data
+
+```{r, dependson='loadData'}
+names(loansRaw)
+str(loansRaw)
+head(loansRaw)
+```
+
+
+### Find out about missing values
+
+#### Explicit NAs
+
+```{r, dependson='loadData'}
+sum(is.na(loansRaw))
+dim(loansRaw)
+sum(complete.cases(loansRaw))
+loansRaw[!complete.cases(loansRaw),]
+```
+
+#### Implicit NAs
+```{r, dependson='loadData'}
+table(loansRaw$Employment.Length)
+```
+
+
+### Converting character vectors into numerical vectors
+
+```{r processData, dependson='loadData'}
+loansProcessed <- loansRaw
+interestRate <- as.numeric(sapply(loansRaw$Interest.Rate, function(x) sub('%','',x)))
+debtToIncomeRatio <- as.numeric(sapply(loansRaw$Debt.To.Income.Ratio, function(x) sub('%','',x)))
+loansProcessed$Interest.Rate <- interestRate
+loansProcessed$Debt.To.Income.Ratio <- debtToIncomeRatio
+class(loansProcessed$Interest.Rate)
+loansProcessed$Interest.Rate[1:10]
+class(loansProcessed$Debt.To.Income.Ratio)
+loansProcessed$Debt.To.Income.Ratio[1:10]
+```
+
+### Transforming 'n/a' values into NAs, exclude observations with NAs
+
+```{r}
+loansProcessed$Employment.Length <- sub('n/a', NA, loansProcessed$Employment.Length)
+table(loansProcessed$Employment.Length, useNA='ifany')
+loansProcessed <- loansProcessed[complete.cases(loansProcessed),]
+dim(loansProcessed)
+
+```
+
+### Transforming Employment.Length
+
+```{r}
+empl <- sub('< 1 year',0,loansProcessed$Employment.Length)
+empl <- sub('10\\+ years',11,empl)
+regpos <- regexec('([0-9]{1,2})(.)*', empl)
+empl <- sapply(regmatches(empl,regpos), function(x)x[2])
+empl <- sub('0','0.5', empl)
+empl <- as.numeric(empl)
+
+loansProcessed$Employment.Length <- empl
+
+```
+
+### Exluding amounts funded <= 0 rename Loan.Length values
+
+```{r}
+loansProcessed <- subset(loansProcessed,Amount.Funded.By.Investors>0)
+loansProcessed$Loan.Length <-  as.factor(sub(' months','',loansProcessed$Loan.Length))
+
+```
+
+
+## Exploratory Analysis
+
+### singular variable analysis
+
+#### Explore interest rate
+
+```{r, dependson='processData'}
+boxplot(loansProcessed$Interest.Rate)
+hist(loansProcessed$Interest.Rate)
+ggplot(loansProcessed,aes(x=Interest.Rate)) + geom_density()
+
+boxplot(Interest.Rate ~ FICO.Range,loansProcessed)#
+boxplot(Interest.Rate ~ Home.Ownership,loansProcessed)
+boxplot(Interest.Rate ~ Employment.Length,loansProcessed)
+boxplot(Interest.Rate ~ Loan.Purpose,loansProcessed)
+boxplot(Interest.Rate ~ Loan.Length,loansProcessed)#
+boxplot(Interest.Rate ~ State,loansProcessed)
+
+```
+
+#### Explore FICO range
+
+```{r, dependson='processData'}
+levels(loansProcessed$FICO.Range)
+table(loansProcessed$FICO.Range)
+barplot(table(loansProcessed$FICO.Range))
+```
+
+#### Explore amount requested
+
+```{r, dependson='processData'}
+boxplot(loansProcessed$Amount.Requested)
+hist(loansProcessed$Amount.Requested)
+ggplot(loansProcessed,aes(x=Amount.Requested)) + geom_density()
+```
+
+
+#### Explore amount founded by investors
+
+```{r, dependson='processData'}
+boxplot(loansProcessed$Amount.Funded.By.Investors)
+hist(loansProcessed$Amount.Funded.By.Investors)
+ggplot(loansProcessed,aes(x=Amount.Funded.By.Investors)) + geom_density()
+
+```
+
+
+#### Explore debt-to-income ratio
+
+A debt-to-income ratio (often abbreviated DTI) is the percentage of a consumer's monthly gross income that goes toward paying debts
+
+```{r, dependson='processData'}
+boxplot(loansProcessed$Debt.To.Income.Ratio)
+hist(loansProcessed$Debt.To.Income.Ratio)
+ggplot(loansProcessed,aes(x=Debt.To.Income.Ratio)) + geom_density()
+
+```
+
+
+#### Explore loan purpose
+
+```{r, dependson='processData'}
+table(loansProcessed$Loan.Purpose)
+barplot(table(loansProcessed$Loan.Purpose))
+
+```
+
+#### Explore monthly income
+
+```{r, dependson='processData'}
+
+boxplot(loansProcessed$Monthly.Income)
+hist(loansProcessed$Monthly.Income,breaks=100)
+```
+
+##### Removing 3 outliers
+
+```{r, dependson='processData'}
+tmp_month <- loansProcessed$Monthly.Income[loansProcessed$Monthly.Income < 30000]
+boxplot(tmp_month)
+hist(tmp_month,breaks=100)
+```
+
+
+#### Explore inquiries in last 6 months
+
+```{r, dependson='processData'}
+barplot(table(loansProcessed$Inquiries.in.the.Last.6.Months))
+
+```
+
+#### Explore Revolving credit balance
+
+```{r, dependson='processData'}
+hist(loansProcessed$Revolving.CREDIT.Balance)
+
+```
+
+
+
+
+
+### make some scatterplots
+
+#### look at the correlation first
+
+
+```{r}
+sapply(loansProcessed,function(x)cor(as.numeric(x),loansProcessed$Interest.Rate))
+cor(loansProcessed$Interest.Rate,as.numeric(as.factor(loansProcessed$Employment.Length)))
+```
+
+#### amount requested vs. interest rate
+
+```{r, dependson='processData'}
+ggplot(loansProcessed,aes(x=Amount.Requested, y=Interest.Rate)) + geom_point(size=3) 
+
+```
+
+#### amount funded vs. interest rate
+
+```{r, dependson='processData'}
+ggplot(loansProcessed,aes(x=Amount.Funded.By.Investors,y=Interest.Rate, colour=as.factor(Employment.Length))) + geom_point()
+```
+#### amount requested vs amount funded
+
+```{r, dependson='processData'}
+ggplot(loansProcessed,aes(x=Amount.Requested, y=Amount.Funded.By.Investors)) + geom_point()
+
+```
+
+#### debt-to-income vs. interest rate
+
+```{r, dependson='processData'}
+ggplot(loansProcessed,aes(x=Debt.To.Income.Ratio, y=Interest.Rate)) + geom_point(size=3,aes(color=Loan.Length))
+
+```
+
+#### FICO range vs. interest rate
+
+```{r, dependson='processData'}
+ggplot(loansProcessed,aes(x=as.numeric(FICO.Range), y=Interest.Rate)) + geom_point(size=3)  + stat_smooth(method=lm)
+
+ggplot(loansProcessed,aes(x=FICO.Range,y=Interest.Rate,colour=as.factor(Employment.Length))) + geom_point()
+ggplot(loansProcessed,aes(x=FICO.Range,y=Interest.Rate,colour=Loan.Length)) + geom_point()
+
+```
+
+#### Revolving credit balance vs. interest rate
+
+```{r,dependson='processData'}
+plot(loansProcessed$Revolving.CREDIT.Balance,loansProcessed$Interest.Rate)
+rev <- subset(loansProcessed,Revolving.CREDIT.Balance<150000)
+plot(rev$Revolving.CREDIT.Balance,rev$Interest.Rate)
+
+plot(loansProcessed$Open.CREDIT.Lines,loansProcessed$Interest.Rate)
+
+```
+
+#### inquiries in last 6 months vs interest rate
+
+```{r, dependson='processData'}
+ggplot(loansProcessed,aes(x=Inquiries.in.the.Last.6.Months,y=Interest.Rate)) + geom_point()
+
+```
+
+### Look at dependencies between Interest Rate and other quantitative variables for each FICO range
+
+
+```{r}
+xyplot(Interest.Rate ~ Amount.Requested | FICO.Range,data=loansProcessed)
+
+xyplot(Interest.Rate ~ Debt.To.Income.Ratio | FICO.Range,data=loansProcessed)
+
+xyplot(Interest.Rate ~ Monthly.Income | FICO.Range,data=loansProcessed)
+
+xyplot(Interest.Rate ~ Monthly.Income | FICO.Range,data=subset(loansProcessed,Monthly.Income < 15000))
+
+xyplot(Interest.Rate ~ Open.CREDIT.Lines | FICO.Range,data=loansProcessed)
+
+xyplot(Interest.Rate ~ Revolving.CREDIT.Balance | FICO.Range,data=loansProcessed)
+
+xyplot(Interest.Rate ~ Revolving.CREDIT.Balance | FICO.Range,data=subset(loansProcessed,Revolving.CREDIT.Balance < 14000))
+
+xyplot(Interest.Rate ~ Revolving.CREDIT.Balance | FICO.Range,data=loansProcessed)
+
+xyplot(Interest.Rate ~ Inquiries.in.the.Last.6.Months | FICO.Range,data=loansProcessed)
+
+xyplot(Interest.Rate ~ Employment.Length | FICO.Range,data=loansProcessed)
+
+```
+
+
+
+### Examining FICO subsets
+
+#### subsetting loansProcessed
+
+#### Range 670-674
+
+```{r subset ,dependson='processData'}
+sort(table(loansProcessed$FICO.Range))
+loansFicoSubset1 <- subset(loansProcessed,FICO.Range == '670-674')
+nrow(loansFicoSubset1)
+
+empl <- sub('< 1 year',0,loansFicoSubset1$Employment.Length)
+empl <- sub('10\\+ years',11,empl)
+regpos <- regexec('([0-9]{1,2})(.)*',empl)
+empl <- sapply(regmatches(empl,regpos),function(x)x[2])
+empl <- sub('0','0.5',empl)
+empl <- as.numeric(empl)
+
+loansFicoSubset1$Employment.Length <- empl
+
+
+```
+
+#### make some histograms for subset
+
+```{r,dependson='subset'}
+boxplot(Interest.Rate ~ FICO.Range,loansFicoSubset1)
+boxplot(Interest.Rate ~ Home.Ownership,loansFicoSubset1)
+boxplot(Interest.Rate ~ Employment.Length,loansFicoSubset1)
+boxplot(Interest.Rate ~ Loan.Purpose,loansFicoSubset1)
+boxplot(Interest.Rate ~ Loan.Length,loansFicoSubset1)#
+boxplot(Interest.Rate ~ State,loansFicoSubset1)
+boxplot(Interest.Rate ~ as.factor(Inquiries.in.the.Last.6.Months),loansFicoSubset1)
+boxplot(Interest.Rate ~ as.factor(Employment.Length ),loansFicoSubset1)
+```
+
+#### make some scatterplots
+
+```{r,dependson='processData'}
+plot(loansFicoSubset1$Amount.Funded.By.Investors,loansFicoSubset1$Interest.Rate,col=loansFicoSubset1$Loan.Length)
+
+plot(loansFicoSubset1$Revolving.CREDIT.Balance,loansFicoSubset1$Interest.Rate,col=loansFicoSubset1$Loan.Length)
+
+plot(loansFicoSubset1$Debt.To.Income.Ratio,loansFicoSubset1$Interest.Rate)
+```
+
+## Modeling
+
+### interest rate ~ Fico(overall)
+
+```{r,dependson='processData'}
+lm1 <- lm(Interest.Rate ~ FICO.Range,loansProcessed)
+summary(lm1)
+par(mfrow = c(1, 2))
+plot(as.numeric(loansProcessed$FICO.Range), lm1$residuals, pch = 19)
+plot(lm1$fitted, lm1$residuals, pch = 19)
+
+```
+
+
+#### Interest.Rate ~ FICO.Range + Amount.Requested
+
+```{r,dependson='processData'}
+lm2 <- lm(Interest.Rate ~ FICO.Range + Amount.Requested,loansProcessed)
+#summary(lm2)
+par(mfrow = c(1, 2))
+plot(loansProcessed$Amount.Requested, lm2$residuals, pch = 19)
+plot(lm2$fitted, lm2$residuals, pch = 19)
+
+```
+
+#### Interest.Rate ~ FICO.Range + Amount.Requested (Colored by Loan.Length, State, Home Ownership, Employment Length)
+
+```{r,dependson='processData'}
+
+lm2 <- lm(Interest.Rate ~ FICO.Range + Amount.Requested,loansProcessed)
+par(mfrow = c(2, 4))
+plot(loansProcessed$Amount.Requested, lm2$residuals, pch = 19,col=loansProcessed$Loan.Length)
+plot(lm2$fitted, lm2$residuals, pch = 19,col=loansProcessed$Loan.Length, main='loan length')
+
+plot(loansProcessed$Amount.Requested, lm2$residuals, pch = 19,col=loansProcessed$State)
+plot(lm2$fitted, lm2$residuals, pch = 19,col=loansProcessed$State,main='state')
+
+plot(loansProcessed$Amount.Requested, lm2$residuals, pch = 19,col=loansProcessed$Home.Ownership)
+plot(lm2$fitted, lm2$residuals, pch = 19,col=loansProcessed$Home.Ownership,main='home ownership')
+
+plot(loansProcessed$Amount.Requested, lm2$residuals, pch = 19,col=loansProcessed$Employment.Length)
+plot(lm2$fitted, lm2$residuals, pch = 19,col=loansProcessed$Employment.Length, main='employment length')
+
+```
+
+
+
+#### Interest.Rate ~ FICO.Range + Amount.Requested + Loan Length
+
+```{r,dependson='processData'}
+lm3 <- lm(Interest.Rate ~ FICO.Range + Amount.Requested + Loan.Length,loansProcessed)
+#summary(lm2)
+par(mfrow = c(1, 2))
+plot(loansProcessed$Amount.Requested, lm3$residuals, pch = 19)
+plot(lm3$fitted, lm3$residuals, pch = 19)
+
+```
+
+#### Coloring lm3
+
+```{r, dependson='processData'}
+par(mfrow = c(2, 4))
+plot(loansProcessed$Amount.Requested, lm3$residuals, pch = 19,col=loansProcessed$Loan.Length)
+plot(lm3$fitted, lm3$residuals, pch = 19,col=loansProcessed$Loan.Length,main='loan length')
+
+plot(loansProcessed$Amount.Funded.By.Investors, lm3$residuals, pch = 19,col=loansProcessed$State)
+plot(lm3$fitted, lm3$residuals, pch = 19,col=loansProcessed$State, main='State')
+
+plot(loansProcessed$Amount.Requested, lm3$residuals, pch = 19,col=loansProcessed$Home.Ownership)
+plot(lm3$fitted, lm3$residuals, pch = 19,col=loansProcessed$Home.Ownership,main='home ownership')
+
+plot(loansProcessed$Amount.Requested, lm3$residuals, pch = 19,col=loansProcessed$Employment.Length)
+plot(lm3$fitted, lm3$residuals, pch = 19,col=loansProcessed$Employment.Length, main='employment length')
+
+```
+
+#### Interest.Rate ~ FICO.Range + Loan Length * Amount.Requested + Loan Length 
+
+```{r,dependson='processData'}
+lm4 <- lm(Interest.Rate ~ FICO.Range + Loan.Length + Amount.Requested*Loan.Length, loansProcessed)
+
+par(mfrow = c(1, 2))
+plot(loansProcessed$Amount.Requested, lm4$residuals, pch = 19)
+plot(lm4$fitted, lm4$residuals, pch = 19)
+
+```
+
+
+
+
+#### Plot the residuals versus the observed and fitted of all prior models here
+
+
+```{r, dependson='processData'}
+par(mfrow=c(2,3))
+plot(lm1$residuals, pch = 19,col=loansProcessed$Loan.Length)
+plot(lm1$fitted, lm1$residuals, pch = 19,col=loansProcessed$Loan.Length)
+
+plot(loansProcessed$Amount.Requested, lm2$residuals, pch = 19,col=loansProcessed$Loan.Length)
+plot(lm2$fitted, lm2$residuals, pch = 19,col=loansProcessed$Loan.Length)
+
+plot(loansProcessed$Amount.Requested, lm3$residuals, pch = 19,col=loansProcessed$Loan.Length)
+plot(lm3$fitted, lm3$residuals, pch = 19,col=loansProcessed$Loan.Length)
+```
+
+#### prior vs interaction
+
+```{r, dependson='processData'}
+par(mfrow=c(1,2))
+
+plot(loansProcessed$Amount.Requested, lm3$residuals, pch = 19,main='lm3')
+plot(loansProcessed$Amount.Requested, lm4$residuals, pch = 19)
+
+plot(lm3$fitted, lm3$residuals, pch = 19,main='lm3')
+plot(lm4$fitted, lm4$residuals, pch = 19)
+
+```
+
+#### Model comparison (lm1 - lm4)
+
+```{r}
+summary(lm1)
+summary(lm2)
+summary(lm3)
+summary(lm4)
+
+qqnorm(lm1$residuals)
+qqline(lm1$residuals)
+
+qqnorm(lm2$residuals)
+qqline(lm2$residuals)
+
+qqnorm(lm3$residuals)
+qqline(lm3$residuals)
+
+confint(lm3)
+
+amount = loansProcessed$Amount.Requested/1000
+
+lm5 <-lm(Interest.Rate ~ as.numeric(FICO.Range) + amount + Loan.Length,loansProcessed)
+confint(lm5)
+
+```
+
+
+### Final Graphics
+
+```{r,dependson='processData'}
+sort(table(loansProcessed$FICO.Range))
+lp.subset <- subset(loansProcessed,FICO.Range=='670-674'|FICO.Range=='675-679'|FICO.Range=='680-684')
+lp.subset
+
+
+g1 <- ggplot(lp.subset,aes(y=Interest.Rate,x=Amount.Requested)) + geom_point(size=2) + facet_grid(FICO.Range~.) + stat_smooth(method=lm,se=FALSE) + xlab('Amount Requested (dollars)') + ylab('Interest Rate (percent)') + theme(axis.title.x=element_text(size=15),axis.title.y=element_text(size=15),strip.text=element_text(size=15),axis.text.y=element_text(size=12),axis.text.x=element_text(size=15)) 
+g1
+
+g2 <- ggplot(,aes(x=loansProcessed$Amount.Requested,y=lm2$residuals)) + geom_point(size=2.5,aes(color=loansProcessed$Loan.Length)) + scale_colour_brewer(palette='Set1') + labs(color='Loan length\n(months)') + xlab('Amount Requested (dollars)') + ylab('No Adjustment Residuals') + theme(axis.title.x=element_text(size=15),axis.title.y=element_text(size=15),legend.title=element_text(size=11),axis.text=element_text(size=15)) + guides(color=FALSE)
+g2
+
+g4 <- ggplot(,aes(x=loansProcessed$Amount.Requested,y=lm4$residuals)) + geom_point(size=2.5,aes(color=loansProcessed$Loan.Length)) + scale_colour_brewer(palette='Set1') + labs(color='Loan length\n(months)') + xlab('Amount Requested (dollars)') + ylab('Full Model Residulas') + theme(axis.title.x=element_text(size=15),axis.title.y=element_text(size=15),legend.title=element_text(size=11),axis.text=element_text(size=15),legend.position=c(0.93,0.1))
+g4
+
+
+
+```
+
+
+
